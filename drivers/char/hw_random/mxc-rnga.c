@@ -58,43 +58,49 @@ struct mxc_rng {
 	struct clk *clk;
 };
 
-static int mxc_rnga_data_present(struct hwrng *rng, int wait)
+static int mxc_rnga_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
-	int i;
+	u32 *out = data, ctrl;
+	int present, retries = 20, i, err;
 	struct mxc_rng *mxc_rng = container_of(rng, struct mxc_rng, rng);
 
-	for (i = 0; i < 20; i++) {
-		/* how many random numbers are in FIFO? [0-16] */
-		int level = (__raw_readl(mxc_rng->mem + RNGA_STATUS) &
-				RNGA_STATUS_LEVEL_MASK) >> 8;
-		if (level || !wait)
-			return !!level;
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
+
+	present = (__raw_readl(mxc_rng->mem + RNGA_STATUS))
+			& RNGA_STATUS_LEVEL_MASK;
+
+	while (wait && !present && retries--) {
 		udelay(10);
+		present = (__raw_readl(mxc_rng->mem + RNGA_STATUS))
+			& RNGA_STATUS_LEVEL_MASK;
 	}
-	return 0;
-}
 
-static int mxc_rnga_data_read(struct hwrng *rng, u32 * data)
-{
-	int err;
-	u32 ctrl;
-	struct mxc_rng *mxc_rng = container_of(rng, struct mxc_rng, rng);
-
-	/* retrieve a random number from FIFO */
-	*data = __raw_readl(mxc_rng->mem + RNGA_OUTPUT_FIFO);
-
-	/* some error while reading this random number? */
-	err = __raw_readl(mxc_rng->mem + RNGA_STATUS) & RNGA_STATUS_ERROR_INT;
-
-	/* if error: clear error interrupt, but doesn't return random number */
-	if (err) {
-		dev_dbg(mxc_rng->dev, "Error while reading random number!\n");
-		ctrl = __raw_readl(mxc_rng->mem + RNGA_CONTROL);
-		__raw_writel(ctrl | RNGA_CONTROL_CLEAR_INT,
-					mxc_rng->mem + RNGA_CONTROL);
+	if (!present)
 		return 0;
-	} else
-		return 4;
+
+	/* how many random numbers are in FIFO? [0-16] */
+	max = min((size_t)present >> 8, max / sizeof(u32));
+
+	for (i = 0; i < max; i++) {
+		out[i] = __raw_readl(mxc_rng->mem + RNGA_OUTPUT_FIFO);
+
+		err = __raw_readl(mxc_rng->mem + RNGA_STATUS)
+			& RNGA_STATUS_ERROR_INT;
+
+		if (err)
+			goto err_clear;
+	}
+
+	return i * sizeof(u32);
+
+err_clear:
+	dev_dbg(mxc_rng->dev, "Error while reading random number!\n");
+	ctrl = __raw_readl(mxc_rng->mem + RNGA_CONTROL);
+	__raw_writel(ctrl | RNGA_CONTROL_CLEAR_INT,
+			mxc_rng->mem + RNGA_CONTROL);
+
+	return i * sizeof(u32);
 }
 
 static int mxc_rnga_init(struct hwrng *rng)
@@ -145,8 +151,7 @@ static int __init mxc_rnga_probe(struct platform_device *pdev)
 	mxc_rng->rng.name = "mxc-rnga";
 	mxc_rng->rng.init = mxc_rnga_init;
 	mxc_rng->rng.cleanup = mxc_rnga_cleanup,
-	mxc_rng->rng.data_present = mxc_rnga_data_present,
-	mxc_rng->rng.data_read = mxc_rnga_data_read,
+	mxc_rng->rng.read = mxc_rnga_read,
 
 	mxc_rng->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(mxc_rng->clk)) {
