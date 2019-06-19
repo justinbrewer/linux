@@ -34,7 +34,7 @@ config HW_RANDOM_TPM
 	---help---
 	  This setting exposes the TPM's Random Number Generator as a hwrng
 	  device. This allows the kernel to collect randomness from the TPM at
-	  boot, and provides the TPM randomines in /dev/hwrng.
+	  boot, and provides the TPM randomness in /dev/hwrng.
 
 	  If unsure, say Y.
 
