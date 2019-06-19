@@ -28,8 +28,6 @@
 struct tx4939_rng {
 	struct hwrng rng;
 	void __iomem *base;
-	u64 databuf[3];
-	unsigned int data_avail;
 };
 
 static void rng_io_start(void)
@@ -62,46 +60,43 @@ static void write_rng(u64 val, void __iomem *base, unsigned int offset)
 	return ____raw_writeq(val, base + offset);
 }
 
-static int tx4939_rng_data_present(struct hwrng *rng, int wait)
+static int tx4939_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
+	u64 *out = data;
+	int present, retries = 20, i;
 	struct tx4939_rng *rngdev = container_of(rng, struct tx4939_rng, rng);
-	int i;
 
-	if (rngdev->data_avail)
-		return rngdev->data_avail;
-	for (i = 0; i < 20; i++) {
-		rng_io_start();
-		if (!(read_rng(rngdev->base, TX4939_RNG_RCSR)
-		      & TX4939_RNG_RCSR_ST)) {
-			rngdev->databuf[0] =
-				read_rng(rngdev->base, TX4939_RNG_ROR(0));
-			rngdev->databuf[1] =
-				read_rng(rngdev->base, TX4939_RNG_ROR(1));
-			rngdev->databuf[2] =
-				read_rng(rngdev->base, TX4939_RNG_ROR(2));
-			rngdev->data_avail =
-				sizeof(rngdev->databuf) / sizeof(u32);
-			/* Start RNG */
-			write_rng(TX4939_RNG_RCSR_ST,
-				  rngdev->base, TX4939_RNG_RCSR);
-			wait = 0;
-		}
-		rng_io_end();
-		if (!wait)
-			break;
+	if (WARN_ON(max < sizeof(u64)))
+		return -EINVAL;
+
+	rng_io_start();
+	present = !(read_rng(rngdev->base, TX4939_RNG_RCSR)
+			& TX4939_RNG_RCSR_ST);
+	rng_io_end();
+
+	while (wait && !present && retries--) {
 		/* 90 bus clock cycles by default for generation */
 		ndelay(90 * 5);
+
+		rng_io_start();
+		present = !(read_rng(rngdev->base, TX4939_RNG_RCSR)
+			& TX4939_RNG_RCSR_ST);
+		rng_io_end();
 	}
-	return rngdev->data_avail;
-}
 
-static int tx4939_rng_data_read(struct hwrng *rng, u32 *buffer)
-{
-	struct tx4939_rng *rngdev = container_of(rng, struct tx4939_rng, rng);
+	if (!present)
+		return 0;
 
-	rngdev->data_avail--;
-	*buffer = *((u32 *)&rngdev->databuf + rngdev->data_avail);
-	return sizeof(u32);
+	max = min((size_t)3, max / sizeof(u64));
+
+	rng_io_start();
+	for (i = 0; i < max; i++)
+		out[i] = read_rng(rngdev->base, TX4939_RNG_ROR(i));
+	/* Start RNG */
+	write_rng(TX4939_RNG_RCSR_ST, rngdev->base, TX4939_RNG_RCSR);
+	rng_io_end();
+
+	return i * sizeof(u64);
 }
 
 static int __init tx4939_rng_probe(struct platform_device *dev)
@@ -109,6 +104,7 @@ static int __init tx4939_rng_probe(struct platform_device *dev)
 	struct tx4939_rng *rngdev;
 	struct resource *r;
 	int i;
+	u64 flush[3];
 
 	rngdev = devm_kzalloc(&dev->dev, sizeof(*rngdev), GFP_KERNEL);
 	if (!rngdev)
@@ -119,8 +115,7 @@ static int __init tx4939_rng_probe(struct platform_device *dev)
 		return PTR_ERR(rngdev->base);
 
 	rngdev->rng.name = dev_name(&dev->dev);
-	rngdev->rng.data_present = tx4939_rng_data_present;
-	rngdev->rng.data_read = tx4939_rng_data_read;
+	rngdev->rng.read = tx4939_rng_read;
 
 	rng_io_start();
 	/* Reset RNG */
@@ -137,11 +132,9 @@ static int __init tx4939_rng_probe(struct platform_device *dev)
 	 * generations; use the ones from the third or subsequent
 	 * generation.
 	 */
-	for (i = 0; i < 2; i++) {
-		rngdev->data_avail = 0;
-		if (!tx4939_rng_data_present(&rngdev->rng, 1))
+	for (i = 0; i < 2; i++)
+		if (!tx4939_rng_read(&rngdev->rng, flush, sizeof(flush), 1))
 			return -EIO;
-	}
 
 	platform_set_drvdata(dev, rngdev);
 	return devm_hwrng_register(&dev->dev, &rngdev->rng);
