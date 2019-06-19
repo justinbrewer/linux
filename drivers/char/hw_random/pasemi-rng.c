@@ -31,26 +31,28 @@
 
 #define MODULE_NAME "pasemi_rng"
 
-static int pasemi_rng_data_present(struct hwrng *rng, int wait)
+static int pasemi_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
+	int present, retries = 20;
 	void __iomem *rng_regs = (void __iomem *)rng->priv;
-	int data, i;
 
-	for (i = 0; i < 20; i++) {
-		data = (in_le32(rng_regs + SDCRNG_CTL_REG)
-			& SDCRNG_CTL_FVLD_M) ? 1 : 0;
-		if (data || !wait)
-			break;
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
+
+	present = in_le32(rng_regs + SDCRNG_CTL_REG) & SDCRNG_CTL_FVLD_M;
+
+	while (wait && !present && retries--) {
 		udelay(10);
+		present = in_le32(rng_regs + SDCRNG_CTL_REG)
+			& SDCRNG_CTL_FVLD_M;
 	}
-	return data;
-}
 
-static int pasemi_rng_data_read(struct hwrng *rng, u32 *data)
-{
-	void __iomem *rng_regs = (void __iomem *)rng->priv;
-	*data = in_le32(rng_regs + SDCRNG_VAL_REG);
-	return 4;
+	if (!present)
+		return 0;
+
+	*(u32 *)data = in_le32(rng_regs + SDCRNG_VAL_REG);
+
+	return sizeof(u32);
 }
 
 static int pasemi_rng_init(struct hwrng *rng)
@@ -79,8 +81,7 @@ static struct hwrng pasemi_rng = {
 	.name		= MODULE_NAME,
 	.init		= pasemi_rng_init,
 	.cleanup	= pasemi_rng_cleanup,
-	.data_present	= pasemi_rng_data_present,
-	.data_read	= pasemi_rng_data_read,
+	.read		= pasemi_rng_read,
 };
 
 static int rng_probe(struct platform_device *pdev)
