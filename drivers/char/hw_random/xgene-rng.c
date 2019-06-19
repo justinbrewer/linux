@@ -208,33 +208,34 @@ static irqreturn_t xgene_rng_irq_handler(int irq, void *id)
 	return IRQ_HANDLED;
 }
 
-static int xgene_rng_data_present(struct hwrng *rng, int wait)
+static int xgene_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
+	u32 *out = data;
+	int present, retries = XGENE_RNG_RETRY_COUNT, i;
 	struct xgene_rng_dev *ctx = (struct xgene_rng_dev *) rng->priv;
-	u32 i, val = 0;
 
-	for (i = 0; i < XGENE_RNG_RETRY_COUNT; i++) {
-		val = readl(ctx->csr_base + RNG_INTR_STS_ACK);
-		if ((val & READY_MASK) || !wait)
-			break;
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
+
+	present = readl(ctx->csr_base + RNG_INTR_STS_ACK) & READY_MASK;
+
+	while (wait && !present && retries--) {
 		udelay(XGENE_RNG_RETRY_INTERVAL);
+		present = readl(ctx->csr_base + RNG_INTR_STS_ACK) & READY_MASK;
 	}
 
-	return (val & READY_MASK);
-}
+	if (!present)
+		return 0;
 
-static int xgene_rng_data_read(struct hwrng *rng, u32 *data)
-{
-	struct xgene_rng_dev *ctx = (struct xgene_rng_dev *) rng->priv;
-	int i;
+	max = min((size_t)ctx->datum_size, max / sizeof(u32));
 
-	for (i = 0; i < ctx->datum_size; i++)
-		data[i] = readl(ctx->csr_base + RNG_INOUT_0 + i * 4);
+	for (i = 0; i < max; i++)
+		out[i] = readl(ctx->csr_base + RNG_INOUT_0 + i * sizeof(u32));
 
 	/* Clear ready bit to start next transaction */
 	writel(READY_MASK, ctx->csr_base + RNG_INTR_STS_ACK);
 
-	return ctx->datum_size << 2;
+	return max * sizeof(u32);
 }
 
 static void xgene_rng_init_internal(struct xgene_rng_dev *ctx)
@@ -307,8 +308,7 @@ MODULE_DEVICE_TABLE(acpi, xgene_rng_acpi_match);
 static struct hwrng xgene_rng_func = {
 	.name		= "xgene-rng",
 	.init		= xgene_rng_init,
-	.data_present	= xgene_rng_data_present,
-	.data_read	= xgene_rng_data_read,
+	.read		= xgene_rng_read,
 };
 
 static int xgene_rng_probe(struct platform_device *pdev)
