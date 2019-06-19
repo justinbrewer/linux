@@ -134,39 +134,33 @@ static void ks_sa_rng_cleanup(struct hwrng *rng)
 			  SA_CMD_STATUS_REG_TRNG_ENABLE, 0);
 }
 
-static int ks_sa_rng_data_read(struct hwrng *rng, u32 *data)
+static int ks_sa_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
+	u32 *out = data;
+	int present, retries = SA_MAX_RNG_DATA_RETRIES;
 	struct device *dev = (struct device *)rng->priv;
 	struct ks_sa_rng *ks_sa_rng = dev_get_drvdata(dev);
 
-	/* Read random data */
-	data[0] = readl(&ks_sa_rng->reg_rng->output_l);
-	data[1] = readl(&ks_sa_rng->reg_rng->output_h);
+	if (WARN_ON(max < 2 * sizeof(u32)))
+		return -EINVAL;
+
+	present = readl(&ks_sa_rng->reg_rng->status) & TRNG_STATUS_REG_READY;
+
+	while (wait && !present && retries--) {
+		udelay(SA_RNG_DATA_RETRY_DELAY);
+		present = readl(&ks_sa_rng->reg_rng->status)
+			& TRNG_STATUS_REG_READY;
+	}
+
+	if (!present)
+		return 0;
+
+	out[0] = readl(&ks_sa_rng->reg_rng->output_l);
+	out[1] = readl(&ks_sa_rng->reg_rng->output_h);
 
 	writel(TRNG_INTACK_REG_READY, &ks_sa_rng->reg_rng->intack);
 
-	return sizeof(u32) * 2;
-}
-
-static int ks_sa_rng_data_present(struct hwrng *rng, int wait)
-{
-	struct device *dev = (struct device *)rng->priv;
-	struct ks_sa_rng *ks_sa_rng = dev_get_drvdata(dev);
-
-	u32	ready;
-	int	j;
-
-	for (j = 0; j < SA_MAX_RNG_DATA_RETRIES; j++) {
-		ready = readl(&ks_sa_rng->reg_rng->status);
-		ready &= TRNG_STATUS_REG_READY;
-
-		if (ready || !wait)
-			break;
-
-		udelay(SA_RNG_DATA_RETRY_DELAY);
-	}
-
-	return ready;
+	return 2 * sizeof(u32);
 }
 
 static int ks_sa_rng_probe(struct platform_device *pdev)
@@ -184,8 +178,7 @@ static int ks_sa_rng_probe(struct platform_device *pdev)
 	ks_sa_rng->rng = (struct hwrng) {
 		.name = "ks_sa_hwrng",
 		.init = ks_sa_rng_init,
-		.data_read = ks_sa_rng_data_read,
-		.data_present = ks_sa_rng_data_present,
+		.read = ks_sa_rng_read,
 		.cleanup = ks_sa_rng_cleanup,
 	};
 	ks_sa_rng->rng.priv = (unsigned long)dev;
