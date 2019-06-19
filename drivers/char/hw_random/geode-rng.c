@@ -52,36 +52,30 @@ static const struct pci_device_id pci_tbl[] = {
 };
 MODULE_DEVICE_TABLE(pci, pci_tbl);
 
-
-static int geode_rng_data_read(struct hwrng *rng, u32 *data)
+static int geode_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
+	int present, retries = 20;
 	void __iomem *mem = (void __iomem *)rng->priv;
 
-	*data = readl(mem + GEODE_RNG_DATA_REG);
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
 
-	return 4;
-}
+	present = readl(mem + GEODE_RNG_STATUS_REG) & GEODE_RNG_STATUS_BIT;
 
-static int geode_rng_data_present(struct hwrng *rng, int wait)
-{
-	void __iomem *mem = (void __iomem *)rng->priv;
-	int data, i;
-
-	for (i = 0; i < 20; i++) {
-		data = readl(mem + GEODE_RNG_STATUS_REG)
-			& GEODE_RNG_STATUS_BIT;
-		if (data || !wait)
-			break;
+	while (wait && !present && retries--) {
 		udelay(10);
+		present = readl(mem + GEODE_RNG_STATUS_REG)
+			& GEODE_RNG_STATUS_BIT;
 	}
-	return data;
-}
 
+	*(u32 *)data = readl(mem + GEODE_RNG_DATA_REG);
+
+	return sizeof(u32);
+}
 
 static struct hwrng geode_rng = {
 	.name		= "geode",
-	.data_present	= geode_rng_data_present,
-	.data_read	= geode_rng_data_read,
+	.read		= geode_rng_read,
 };
 
 
