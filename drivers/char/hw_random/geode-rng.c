@@ -36,6 +36,7 @@
 
 #define GEODE_RNG_DATA_REG   0x50
 #define GEODE_RNG_STATUS_REG 0x54
+#define GEODE_RNG_STATUS_BIT 0x01
 
 /*
  * Data for PCI driver interface
@@ -67,7 +68,8 @@ static int geode_rng_data_present(struct hwrng *rng, int wait)
 	int data, i;
 
 	for (i = 0; i < 20; i++) {
-		data = !!(readl(mem + GEODE_RNG_STATUS_REG));
+		data = readl(mem + GEODE_RNG_STATUS_REG)
+			& GEODE_RNG_STATUS_BIT;
 		if (data || !wait)
 			break;
 		udelay(10);
