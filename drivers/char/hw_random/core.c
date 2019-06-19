@@ -179,23 +179,10 @@ static int rng_dev_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static inline int rng_get_data(struct hwrng *rng, u8 *buffer, size_t size,
-			int wait) {
-	int present;
-
+static int rng_get_data(struct hwrng *rng, u8 *buffer, size_t size, int wait)
+{
 	BUG_ON(!mutex_is_locked(&reading_mutex));
-	if (rng->read)
-		return rng->read(rng, (void *)buffer, size, wait);
-
-	if (rng->data_present)
-		present = rng->data_present(rng, wait);
-	else
-		present = 1;
-
-	if (present)
-		return rng->data_read(rng, (u32 *)buffer);
-
-	return 0;
+	return rng->read(rng, (void *)buffer, size, wait);
 }
 
 static ssize_t rng_dev_read(struct file *filp, char __user *buf,
@@ -460,7 +447,7 @@ int hwrng_register(struct hwrng *rng)
 	struct hwrng *old_rng, *tmp;
 	struct list_head *rng_list_ptr;
 
-	if (!rng->name || (!rng->data_read && !rng->read))
+	if (!rng->name || !rng->read)
 		goto out;
 
 	mutex_lock(&rng_mutex);
