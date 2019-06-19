@@ -164,26 +164,26 @@ static inline u8 hwstatus_set(void __iomem *mem,
 	return hwstatus_get(mem);
 }
 
-static int intel_rng_data_present(struct hwrng *rng, int wait)
+static int intel_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
+	int present, retries = 20;
 	void __iomem *mem = (void __iomem *)rng->priv;
-	int data, i;
 
-	for (i = 0; i < 20; i++) {
-		data = !!(readb(mem + INTEL_RNG_STATUS) &
-			  INTEL_RNG_DATA_PRESENT);
-		if (data || !wait)
-			break;
+	if (WARN_ON(max < sizeof(u8)))
+		return -EINVAL;
+
+	present = readb(mem + INTEL_RNG_STATUS) & INTEL_RNG_DATA_PRESENT;
+
+	while (wait && !present && retries--) {
 		udelay(10);
+		present = readb(mem + INTEL_RNG_STATUS)
+			& INTEL_RNG_DATA_PRESENT;
 	}
-	return data;
-}
 
-static int intel_rng_data_read(struct hwrng *rng, u32 *data)
-{
-	void __iomem *mem = (void __iomem *)rng->priv;
+	if (!present)
+		return 0;
 
-	*data = readb(mem + INTEL_RNG_DATA);
+	*(u8 *)data = readb(mem + INTEL_RNG_DATA);
 
 	return 1;
 }
@@ -224,8 +224,7 @@ static struct hwrng intel_rng = {
 	.name		= "intel",
 	.init		= intel_rng_init,
 	.cleanup	= intel_rng_cleanup,
-	.data_present	= intel_rng_data_present,
-	.data_read	= intel_rng_data_read,
+	.read		= intel_rng_read,
 };
 
 struct intel_rng_hw {
