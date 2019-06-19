@@ -84,46 +84,44 @@ static inline u32 xstore(u32 *addr, u32 edx_in)
 	return eax_out;
 }
 
-static int via_rng_data_present(struct hwrng *rng, int wait)
+/* We choose the recommended 1-byte-per-instruction RNG rate,
+ * for greater randomness at the expense of speed.  Larger
+ * values 2, 4, or 8 bytes-per-instruction yield greater
+ * speed at lesser randomness.
+ *
+ * If you change this to another VIA_CHUNK_n, you must also
+ * change the ->n_bytes values in rng_vendor_ops[] tables.
+ * VIA_CHUNK_8 requires further code changes.
+ *
+ * A copy of MSR_VIA_RNG is placed in eax_out when xstore
+ * completes.
+ */
+
+static int via_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
+	int present, retries = 20;
 	char buf[16 + PADLOCK_ALIGNMENT - STACK_ALIGN] __attribute__
 		((aligned(STACK_ALIGN)));
 	u32 *via_rng_datum = (u32 *)PTR_ALIGN(&buf[0], PADLOCK_ALIGNMENT);
-	u32 bytes_out;
-	int i;
 
-	/* We choose the recommended 1-byte-per-instruction RNG rate,
-	 * for greater randomness at the expense of speed.  Larger
-	 * values 2, 4, or 8 bytes-per-instruction yield greater
-	 * speed at lesser randomness.
-	 *
-	 * If you change this to another VIA_CHUNK_n, you must also
-	 * change the ->n_bytes values in rng_vendor_ops[] tables.
-	 * VIA_CHUNK_8 requires further code changes.
-	 *
-	 * A copy of MSR_VIA_RNG is placed in eax_out when xstore
-	 * completes.
-	 */
+	if (WARN_ON(max < sizeof(u8)))
+		return -EINVAL;
 
-	for (i = 0; i < 20; i++) {
+	present = xstore(via_rng_datum, VIA_RNG_CHUNK_1) & VIA_XSTORE_CNT_MASK;
+
+	while (wait && !present && retries--) {
 		*via_rng_datum = 0; /* paranoia, not really necessary */
-		bytes_out = xstore(via_rng_datum, VIA_RNG_CHUNK_1);
-		bytes_out &= VIA_XSTORE_CNT_MASK;
-		if (bytes_out || !wait)
-			break;
 		udelay(10);
+		present = xstore(via_rng_datum, VIA_RNG_CHUNK_1)
+			& VIA_XSTORE_CNT_MASK;
 	}
-	rng->priv = *via_rng_datum;
-	return bytes_out ? 1 : 0;
-}
 
-static int via_rng_data_read(struct hwrng *rng, u32 *data)
-{
-	u32 via_rng_datum = (u32)rng->priv;
+	if (!present)
+		return 0;
 
-	*data = via_rng_datum;
+	*(u8 *)data = *(u8 *)via_rng_datum;
 
-	return 1;
+	return sizeof(u8);
 }
 
 static int via_rng_init(struct hwrng *rng)
@@ -187,8 +185,7 @@ static int via_rng_init(struct hwrng *rng)
 static struct hwrng via_rng = {
 	.name		= "via",
 	.init		= via_rng_init,
-	.data_present	= via_rng_data_present,
-	.data_read	= via_rng_data_read,
+	.read		= via_rng_read,
 };
 
 
