@@ -746,28 +746,23 @@ static struct pci2id {
 };
 
 #ifdef CONFIG_CRYPTO_DEV_HIFN_795X_RNG
-static int hifn_rng_data_present(struct hwrng *rng, int wait)
+static int hifn_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
 	struct hifn_device *dev = (struct hifn_device *)rng->priv;
 	s64 nsec;
 
 	nsec = ktime_to_ns(ktime_sub(ktime_get(), dev->rngtime));
 	nsec -= dev->rng_wait_time;
-	if (nsec <= 0)
-		return 1;
-	if (!wait)
-		return 0;
-	ndelay(nsec);
-	return 1;
-}
 
-static int hifn_rng_data_read(struct hwrng *rng, u32 *data)
-{
-	struct hifn_device *dev = (struct hifn_device *)rng->priv;
+	if (nsec > 0) {
+		if (!wait)
+			return 0;
+		ndelay(nsec);
+	}
 
-	*data = hifn_read_1(dev, HIFN_1_RNG_DATA);
+	*(u32 *)data = hifn_read_1(dev, HIFN_1_RNG_DATA);
 	dev->rngtime = ktime_get();
-	return 4;
+	return sizeof(u32);
 }
 
 static int hifn_register_rng(struct hifn_device *dev)
@@ -779,8 +774,7 @@ static int hifn_register_rng(struct hifn_device *dev)
 						   dev->pk_clk_freq) * 256;
 
 	dev->rng.name		= dev->name;
-	dev->rng.data_present	= hifn_rng_data_present,
-	dev->rng.data_read	= hifn_rng_data_read,
+	dev->rng.read		= hifn_rng_read,
 	dev->rng.priv		= (unsigned long)dev;
 
 	return hwrng_register(&dev->rng);
