@@ -37,10 +37,10 @@ static struct task_struct *hwrng_fill;
 static LIST_HEAD(rng_list);
 /* Protects rng_list and current_rng */
 static DEFINE_MUTEX(rng_mutex);
-/* Protects rng read functions, data_avail, rng_buffer and rng_fillbuf */
+/* Protects rng read functions, data_avail, rng_buffer */
 static DEFINE_MUTEX(reading_mutex);
 static int data_avail;
-static u8 *rng_buffer, *rng_fillbuf;
+static u8 *rng_buffer;
 static unsigned short current_quality;
 static unsigned short default_quality; /* = 0; default to "off" */
 
@@ -401,7 +401,7 @@ static int __init register_miscdev(void)
 	return misc_register(&rng_miscdev);
 }
 
-static int hwrng_fillfn(void *unused)
+static int hwrng_fillfn(void *buffer)
 {
 	long rc;
 
@@ -412,7 +412,7 @@ static int hwrng_fillfn(void *unused)
 		if (IS_ERR(rng) || !rng)
 			break;
 		mutex_lock(&reading_mutex);
-		rc = rng_get_data(rng, rng_fillbuf, RNG_BUFFER_SIZE, 1);
+		rc = rng_get_data(rng, buffer, RNG_BUFFER_SIZE, 1);
 		mutex_unlock(&reading_mutex);
 		put_rng(rng);
 		if (rc <= 0) {
@@ -421,18 +421,26 @@ static int hwrng_fillfn(void *unused)
 			continue;
 		}
 		/* Outside lock, sure, but y'know: randomness. */
-		add_hwgenerator_randomness((void *)rng_fillbuf, rc,
+		add_hwgenerator_randomness(buffer, rc,
 					   rc * current_quality * 8 >> 10);
 	}
+
+	kfree(buffer);
 	hwrng_fill = NULL;
 	return 0;
 }
 
 static void start_khwrngd(void)
 {
-	hwrng_fill = kthread_run(hwrng_fillfn, NULL, "hwrng");
+	void *buffer = kmalloc(RNG_BUFFER_SIZE, GFP_KERNEL);
+
+	if (!buffer)
+		return;
+
+	hwrng_fill = kthread_run(hwrng_fillfn, buffer, "hwrng");
 	if (IS_ERR(hwrng_fill)) {
 		pr_err("hwrng_fill thread creation failed\n");
+		kfree(buffer);
 		hwrng_fill = NULL;
 	}
 }
@@ -574,17 +582,9 @@ static int __init hwrng_modinit(void)
 	if (!rng_buffer)
 		return -ENOMEM;
 
-	rng_fillbuf = kmalloc(RNG_BUFFER_SIZE, GFP_KERNEL);
-	if (!rng_fillbuf) {
-		kfree(rng_buffer);
-		return -ENOMEM;
-	}
-
 	ret = register_miscdev();
-	if (ret) {
-		kfree(rng_fillbuf);
+	if (ret)
 		kfree(rng_buffer);
-	}
 
 	return ret;
 }
@@ -594,7 +594,6 @@ static void __exit hwrng_modexit(void)
 	mutex_lock(&rng_mutex);
 	BUG_ON(current_rng);
 	kfree(rng_buffer);
-	kfree(rng_fillbuf);
 	mutex_unlock(&rng_mutex);
 
 	unregister_miscdev();
