@@ -734,32 +734,32 @@ DEF_TALITOS2_INTERRUPT(ch1_3, TALITOS2_ISR_CH_1_3_DONE, TALITOS2_ISR_CH_1_3_ERR,
 /*
  * hwrng
  */
-static int talitos_rng_data_present(struct hwrng *rng, int wait)
+static int talitos_rng_read(struct hwrng *rng, void *data, size_t max,
+		bool wait)
 {
+	int present, retries = 20;
 	struct device *dev = (struct device *)rng->priv;
 	struct talitos_private *priv = dev_get_drvdata(dev);
-	u32 ofl;
-	int i;
 
-	for (i = 0; i < 20; i++) {
-		ofl = in_be32(priv->reg_rngu + TALITOS_EUSR_LO) &
-		      TALITOS_RNGUSR_LO_OFL;
-		if (ofl || !wait)
-			break;
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
+
+
+	present = in_be32(priv->reg_rngu + TALITOS_EUSR_LO)
+			& TALITOS_RNGUSR_LO_OFL;
+
+	while (wait && !present && retries--) {
 		udelay(10);
+		present = in_be32(priv->reg_rngu + TALITOS_EUSR_LO)
+				& TALITOS_RNGUSR_LO_OFL;
 	}
 
-	return !!ofl;
-}
-
-static int talitos_rng_data_read(struct hwrng *rng, u32 *data)
-{
-	struct device *dev = (struct device *)rng->priv;
-	struct talitos_private *priv = dev_get_drvdata(dev);
+	if (!present)
+		return 0;
 
 	/* rng fifo requires 64-bit accesses */
-	*data = in_be32(priv->reg_rngu + TALITOS_EU_FIFO);
-	*data = in_be32(priv->reg_rngu + TALITOS_EU_FIFO_LO);
+	*(u32 *)data = in_be32(priv->reg_rngu + TALITOS_EU_FIFO);
+	*(u32 *)data = in_be32(priv->reg_rngu + TALITOS_EU_FIFO_LO);
 
 	return sizeof(u32);
 }
@@ -793,8 +793,7 @@ static int talitos_register_rng(struct device *dev)
 
 	priv->rng.name		= dev_driver_string(dev),
 	priv->rng.init		= talitos_rng_init,
-	priv->rng.data_present	= talitos_rng_data_present,
-	priv->rng.data_read	= talitos_rng_data_read,
+	priv->rng.read		= talitos_rng_read,
 	priv->rng.priv		= (unsigned long)dev;
 
 	err = hwrng_register(&priv->rng);
