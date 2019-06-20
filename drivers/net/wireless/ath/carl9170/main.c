@@ -1586,10 +1586,14 @@ static int carl9170_rng_get(struct ar9170 *ar)
 	return 0;
 }
 
-static int carl9170_rng_read(struct hwrng *rng, u32 *data)
+static int carl9170_rng_read(struct hwrng *rng, void *data, size_t max,
+			     bool wait)
 {
 	struct ar9170 *ar = (struct ar9170 *)rng->priv;
 	int ret = -EIO;
+
+	if (WARN_ON(max < sizeof(u16)))
+		return -EINVAL;
 
 	mutex_lock(&ar->mutex);
 	if (ar->rng.cache_idx >= ARRAY_SIZE(ar->rng.cache)) {
@@ -1600,7 +1604,7 @@ static int carl9170_rng_read(struct hwrng *rng, u32 *data)
 		}
 	}
 
-	*data = ar->rng.cache[ar->rng.cache_idx++];
+	*(u16 *)data = ar->rng.cache[ar->rng.cache_idx++];
 	mutex_unlock(&ar->mutex);
 
 	return sizeof(u16);
@@ -1621,7 +1625,7 @@ static int carl9170_register_hwrng(struct ar9170 *ar)
 	snprintf(ar->rng.name, ARRAY_SIZE(ar->rng.name),
 		 "%s_%s", KBUILD_MODNAME, wiphy_name(ar->hw->wiphy));
 	ar->rng.rng.name = ar->rng.name;
-	ar->rng.rng.data_read = carl9170_rng_read;
+	ar->rng.rng.read = carl9170_rng_read;
 	ar->rng.rng.priv = (unsigned long)ar;
 
 	if (WARN_ON(ar->rng.initialized))
