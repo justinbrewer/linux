@@ -2394,20 +2394,24 @@ static void b43legacy_security_init(struct b43legacy_wldev *dev)
 }
 
 #ifdef CONFIG_B43LEGACY_HWRNG
-static int b43legacy_rng_read(struct hwrng *rng, u32 *data)
+static int b43legacy_rng_read(struct hwrng *rng, void *data, size_t max,
+			      bool wait)
 {
 	struct b43legacy_wl *wl = (struct b43legacy_wl *)rng->priv;
 	unsigned long flags;
+
+	if (WARN_ON(max < sizeof(u16)))
+		return -EINVAL;
 
 	/* Don't take wl->mutex here, as it could deadlock with
 	 * hwrng internal locking. It's not needed to take
 	 * wl->mutex here, anyway. */
 
 	spin_lock_irqsave(&wl->irq_lock, flags);
-	*data = b43legacy_read16(wl->current_dev, B43legacy_MMIO_RNG);
+	*(u16 *)data = b43legacy_read16(wl->current_dev, B43legacy_MMIO_RNG);
 	spin_unlock_irqrestore(&wl->irq_lock, flags);
 
-	return (sizeof(u16));
+	return sizeof(u16);
 }
 #endif
 
@@ -2427,7 +2431,7 @@ static int b43legacy_rng_init(struct b43legacy_wl *wl)
 	snprintf(wl->rng_name, ARRAY_SIZE(wl->rng_name),
 		 "%s_%s", KBUILD_MODNAME, wiphy_name(wl->hw->wiphy));
 	wl->rng.name = wl->rng_name;
-	wl->rng.data_read = b43legacy_rng_read;
+	wl->rng.read = b43legacy_rng_read;
 	wl->rng.priv = (unsigned long)wl;
 	wl->rng_initialized = 1;
 	err = hwrng_register(&wl->rng);
