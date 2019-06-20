@@ -25,28 +25,30 @@
 #define PPC4XX_TRNG_STAT_B	0x1
 #define PPC4XX_TRNG_DATA	0x0000
 
-static int ppc4xx_trng_data_present(struct hwrng *rng, int wait)
+static int ppc4xx_trng_read(struct hwrng *rng, void *data, size_t max,
+		bool wait)
 {
+	int present, retries = 20;
 	struct crypto4xx_device *dev = (void *)rng->priv;
-	int busy, i, present = 0;
 
-	for (i = 0; i < 20; i++) {
-		busy = (in_le32(dev->trng_base + PPC4XX_TRNG_STAT) &
-			PPC4XX_TRNG_STAT_B);
-		if (!busy || !wait) {
-			present = 1;
-			break;
-		}
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
+
+	present = !(in_le32(dev->trng_base + PPC4XX_TRNG_STAT)
+			& PPC4XX_TRNG_STAT_B);
+
+	while (wait && !present && retries--) {
 		udelay(10);
+		present = !(in_le32(dev->trng_base + PPC4XX_TRNG_STAT)
+				& PPC4XX_TRNG_STAT_B);
 	}
-	return present;
-}
 
-static int ppc4xx_trng_data_read(struct hwrng *rng, u32 *data)
-{
-	struct crypto4xx_device *dev = (void *)rng->priv;
-	*data = in_le32(dev->trng_base + PPC4XX_TRNG_DATA);
-	return 4;
+	if (!present)
+		return 0;
+
+	*(u32 *)data = in_le32(dev->trng_base + PPC4XX_TRNG_DATA);
+
+	return sizeof(u32);
 }
 
 static void ppc4xx_trng_enable(struct crypto4xx_device *dev, bool enable)
@@ -92,8 +94,7 @@ void ppc4xx_trng_probe(struct crypto4xx_core_device *core_dev)
 		goto err_out;
 
 	rng->name = KBUILD_MODNAME;
-	rng->data_present = ppc4xx_trng_data_present;
-	rng->data_read = ppc4xx_trng_data_read;
+	rng->read = ppc4xx_trng_read;
 	rng->priv = (unsigned long) dev;
 	core_dev->trng = rng;
 	ppc4xx_trng_enable(dev, true);
