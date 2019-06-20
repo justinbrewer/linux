@@ -1679,30 +1679,36 @@ static u32 *zcrypt_rng_buffer;
 static int zcrypt_rng_buffer_index;
 static DEFINE_MUTEX(zcrypt_rng_mutex);
 
-static int zcrypt_rng_data_read(struct hwrng *rng, u32 *data)
+static int zcrypt_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
 	int rc;
+
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
 
 	/*
 	 * We don't need locking here because the RNG API guarantees serialized
 	 * read method calls.
 	 */
 	if (zcrypt_rng_buffer_index == 0) {
+		if (!wait)
+			return 0;
+
 		rc = zcrypt_rng((char *) zcrypt_rng_buffer);
 		/* on failure: retry once again after a requested rescan */
 		if ((rc == -ENODEV) && (zcrypt_process_rescan()))
 			rc = zcrypt_rng((char *) zcrypt_rng_buffer);
 		if (rc < 0)
 			return -EIO;
-		zcrypt_rng_buffer_index = rc / sizeof(*data);
+		zcrypt_rng_buffer_index = rc / sizeof(u32);
 	}
-	*data = zcrypt_rng_buffer[--zcrypt_rng_buffer_index];
-	return sizeof(*data);
+	*(u32 *)data = zcrypt_rng_buffer[--zcrypt_rng_buffer_index];
+	return sizeof(u32);
 }
 
 static struct hwrng zcrypt_rng_dev = {
 	.name		= "zcrypt",
-	.data_read	= zcrypt_rng_data_read,
+	.read		= zcrypt_rng_read,
 	.quality	= 990,
 };
 
