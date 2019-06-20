@@ -27,6 +27,8 @@
 
 #define RNG_MODULE_NAME		"hw_random"
 
+#define RNG_BUFFER_SIZE (SMP_CACHE_BYTES < 32 ? 32 : SMP_CACHE_BYTES)
+
 static struct hwrng *current_rng;
 /* the current rng has been explicitly chosen by user via sysfs */
 static int cur_rng_set_by_user;
@@ -56,15 +58,10 @@ static void start_khwrngd(void);
 static inline int rng_get_data(struct hwrng *rng, u8 *buffer, size_t size,
 			       int wait);
 
-static size_t rng_buffer_size(void)
-{
-	return SMP_CACHE_BYTES < 32 ? 32 : SMP_CACHE_BYTES;
-}
-
 static void add_early_randomness(struct hwrng *rng)
 {
 	int bytes_read;
-	size_t size = min_t(size_t, 16, rng_buffer_size());
+	size_t size = min_t(size_t, 16, RNG_BUFFER_SIZE);
 
 	mutex_lock(&reading_mutex);
 	bytes_read = rng_get_data(rng, rng_buffer, size, 1);
@@ -210,7 +207,7 @@ static ssize_t rng_dev_read(struct file *filp, char __user *buf,
 		}
 		if (!data_avail) {
 			bytes_read = rng_get_data(rng, rng_buffer,
-				rng_buffer_size(),
+				RNG_BUFFER_SIZE,
 				!(filp->f_flags & O_NONBLOCK));
 			if (bytes_read < 0) {
 				err = bytes_read;
@@ -415,8 +412,7 @@ static int hwrng_fillfn(void *unused)
 		if (IS_ERR(rng) || !rng)
 			break;
 		mutex_lock(&reading_mutex);
-		rc = rng_get_data(rng, rng_fillbuf,
-				  rng_buffer_size(), 1);
+		rc = rng_get_data(rng, rng_fillbuf, RNG_BUFFER_SIZE, 1);
 		mutex_unlock(&reading_mutex);
 		put_rng(rng);
 		if (rc <= 0) {
@@ -574,11 +570,11 @@ static int __init hwrng_modinit(void)
 	int ret = -ENOMEM;
 
 	/* kmalloc makes this safe for virt_to_page() in virtio_rng.c */
-	rng_buffer = kmalloc(rng_buffer_size(), GFP_KERNEL);
+	rng_buffer = kmalloc(RNG_BUFFER_SIZE, GFP_KERNEL);
 	if (!rng_buffer)
 		return -ENOMEM;
 
-	rng_fillbuf = kmalloc(rng_buffer_size(), GFP_KERNEL);
+	rng_fillbuf = kmalloc(RNG_BUFFER_SIZE, GFP_KERNEL);
 	if (!rng_fillbuf) {
 		kfree(rng_buffer);
 		return -ENOMEM;
