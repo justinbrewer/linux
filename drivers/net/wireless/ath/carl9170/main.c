@@ -1590,24 +1590,36 @@ static int carl9170_rng_read(struct hwrng *rng, void *data, size_t max,
 			     bool wait)
 {
 	struct ar9170 *ar = (struct ar9170 *)rng->priv;
-	int ret = -EIO;
+	int ret = 0, i;
+	u16 *out = data;
 
 	if (WARN_ON(max < sizeof(u16)))
 		return -EINVAL;
 
 	mutex_lock(&ar->mutex);
-	if (ar->rng.cache_idx >= ARRAY_SIZE(ar->rng.cache)) {
+	BUG_ON(ar->rng.cache_idx > ARRAY_SIZE(ar->rng.cache));
+
+	if (ar->rng.cache_idx == ARRAY_SIZE(ar->rng.cache)) {
+		if (!wait)
+			goto done;
+
 		ret = carl9170_rng_get(ar);
-		if (ret) {
-			mutex_unlock(&ar->mutex);
-			return ret;
-		}
+		if (ret)
+			goto done;
 	}
 
-	*(u16 *)data = ar->rng.cache[ar->rng.cache_idx++];
-	mutex_unlock(&ar->mutex);
+	max = min(ARRAY_SIZE(ar->rng.cache) - ar->rng.cache_idx,
+		  max / sizeof(u16));
 
-	return sizeof(u16);
+	for (i = 0; i < max; i++)
+		out[i] = ar->rng.cache[ar->rng.cache_idx + i];
+
+	ar->rng.cache_idx += i;
+	ret = i * sizeof(u16);
+
+done:
+	mutex_unlock(&ar->mutex);
+	return ret;
 }
 
 static void carl9170_unregister_hwrng(struct ar9170 *ar)
