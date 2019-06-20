@@ -168,17 +168,6 @@ static inline void _trng_hwrng_read(u8 *buf, size_t len)
 	atomic64_add(len, &trng_hwrng_counter);
 }
 
-static int trng_hwrng_data_read(struct hwrng *rng, u32 *data)
-{
-	size_t len = sizeof(*data);
-
-	_trng_hwrng_read((u8 *) data, len);
-
-	DEBUG_DBG("trng_hwrng_data_read()=%zu\n", len);
-
-	return len;
-}
-
 static int trng_hwrng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
 	size_t len = max <= PAGE_SIZE ? max : PAGE_SIZE;
@@ -197,7 +186,6 @@ static int trng_hwrng_read(struct hwrng *rng, void *data, size_t max, bool wait)
  */
 static struct hwrng trng_hwrng_dev = {
 	.name		= "s390-trng",
-	.data_read	= trng_hwrng_data_read,
 	.read		= trng_hwrng_read,
 	.quality	= 999,
 };
