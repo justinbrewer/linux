@@ -47,11 +47,14 @@ static void octeon_rng_cleanup(struct hwrng *rng)
 	cvmx_write_csr((u64)p->control_status, ctl.u64);
 }
 
-static int octeon_rng_data_read(struct hwrng *rng, u32 *data)
+static int octeon_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
 	struct octeon_rng *p = container_of(rng, struct octeon_rng, ops);
 
-	*data = cvmx_read64_uint32((u64)p->result);
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
+
+	*(u32 *)data = cvmx_read64_uint32((u64)p->result);
 	return sizeof(u32);
 }
 
@@ -65,7 +68,7 @@ static int octeon_rng_probe(struct platform_device *pdev)
 		.name = "octeon",
 		.init = octeon_rng_init,
 		.cleanup = octeon_rng_cleanup,
-		.data_read = octeon_rng_data_read
+		.read = octeon_rng_read
 	};
 
 	rng = devm_kzalloc(&pdev->dev, sizeof(*rng), GFP_KERNEL);
