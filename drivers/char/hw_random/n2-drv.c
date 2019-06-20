@@ -416,25 +416,28 @@ static int n2rng_init_control(struct n2rng *np)
 	return 0;
 }
 
-static int n2rng_data_read(struct hwrng *rng, u32 *data)
+static int n2rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
 	struct n2rng *np = (struct n2rng *) rng->priv;
 	unsigned long ra = __pa(&np->test_data);
 	int len;
 
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
+
 	if (!(np->flags & N2RNG_FLAG_READY)) {
 		len = 0;
 	} else if (np->flags & N2RNG_FLAG_BUFFER_VALID) {
 		np->flags &= ~N2RNG_FLAG_BUFFER_VALID;
-		*data = np->buffer;
-		len = 4;
+		*(u32 *)data = np->buffer;
+		len = sizeof(u32);
 	} else {
 		int err = n2rng_generic_read_data(ra);
 		if (!err) {
 			np->flags |= N2RNG_FLAG_BUFFER_VALID;
 			np->buffer = np->test_data >> 32;
-			*data = np->test_data & 0xffffffff;
-			len = 4;
+			*(u32 *)data = np->test_data & 0xffffffff;
+			len = sizeof(u32);
 		} else {
 			dev_err(&np->op->dev, "RNG error, retesting\n");
 			np->flags &= ~N2RNG_FLAG_READY;
@@ -765,7 +768,7 @@ static int n2rng_probe(struct platform_device *op)
 		 np->num_units);
 
 	np->hwrng.name = DRV_MODULE_NAME;
-	np->hwrng.data_read = n2rng_data_read;
+	np->hwrng.read = n2rng_read;
 	np->hwrng.priv = (unsigned long) np;
 
 	err = hwrng_register(&np->hwrng);
