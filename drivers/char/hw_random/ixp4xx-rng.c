@@ -26,18 +26,20 @@
 #include <mach/hardware.h>
 
 
-static int ixp4xx_rng_data_read(struct hwrng *rng, u32 *buffer)
+static int ixp4xx_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
 	void __iomem * rng_base = (void __iomem *)rng->priv;
 
-	*buffer = __raw_readl(rng_base);
+	BUG_ON(max < sizeof(u32));
 
-	return 4;
+	*(u32 *)data = __raw_readl(rng_base);
+
+	return sizeof(u32);
 }
 
 static struct hwrng ixp4xx_rng_ops = {
 	.name		= "ixp4xx",
-	.data_read	= ixp4xx_rng_data_read,
+	.read		= ixp4xx_rng_read,
 };
 
 static int __init ixp4xx_rng_init(void)
