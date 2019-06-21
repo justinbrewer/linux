@@ -1675,13 +1675,14 @@ static struct miscdevice zcrypt_misc_device = {
 };
 
 static int zcrypt_rng_device_count;
-static u32 *zcrypt_rng_buffer;
+static u8 *zcrypt_rng_buffer;
 static int zcrypt_rng_buffer_index;
 static DEFINE_MUTEX(zcrypt_rng_mutex);
 
 static int zcrypt_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
 	int rc;
+	u8 *begin;
 
 	if (WARN_ON(max < sizeof(u32)))
 		return -EINVAL;
@@ -1700,10 +1701,16 @@ static int zcrypt_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 			rc = zcrypt_rng((char *) zcrypt_rng_buffer);
 		if (rc < 0)
 			return -EIO;
-		zcrypt_rng_buffer_index = rc / sizeof(u32);
+		zcrypt_rng_buffer_index = rc;
 	}
-	*(u32 *)data = zcrypt_rng_buffer[--zcrypt_rng_buffer_index];
-	return sizeof(u32);
+
+	max = min(zcrypt_rng_buffer_index, max);
+	begin = zcrypt_rng_buffer + zcrypt_rng_buffer_index - max;
+	zcrypt_rng_buffer_index -= max;
+
+	memcpy(data, begin, max);
+
+	return max;
 }
 
 static struct hwrng zcrypt_rng_dev = {
@@ -1718,7 +1725,7 @@ int zcrypt_rng_device_add(void)
 
 	mutex_lock(&zcrypt_rng_mutex);
 	if (zcrypt_rng_device_count == 0) {
-		zcrypt_rng_buffer = (u32 *) get_zeroed_page(GFP_KERNEL);
+		zcrypt_rng_buffer = get_zeroed_page(GFP_KERNEL);
 		if (!zcrypt_rng_buffer) {
 			rc = -ENOMEM;
 			goto out;
