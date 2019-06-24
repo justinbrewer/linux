@@ -15,16 +15,10 @@
  */
 
 #include <linux/hw_random.h>
-#include <linux/kthread.h>
 
 #include "ath9k.h"
 #include "hw.h"
 #include "ar9003_phy.h"
-
-#define ATH9K_RNG_BUF_SIZE	320
-#define ATH9K_RNG_ENTROPY(x)	(((x) * 8 * 10) >> 5) /* quality: 10/32 */
-
-static DECLARE_WAIT_QUEUE_HEAD(rng_queue);
 
 static int ath9k_rng_data_read(struct ath_softc *sc, u32 *buf, u32 buf_size)
 {
@@ -54,78 +48,43 @@ static int ath9k_rng_data_read(struct ath_softc *sc, u32 *buf, u32 buf_size)
 
 	sc->rng_last = rng_last;
 
-	return j << 2;
+	return j;
 }
 
-static u32 ath9k_rng_delay_get(u32 fail_stats)
+static int ath9k_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
-	u32 delay;
+	int u32s_read, retries = 20;
+	struct ath_softc *sc = container_of(rng, struct ath_softc, rng);
 
-	if (fail_stats < 100)
-		delay = 10;
-	else if (fail_stats < 105)
-		delay = 1000;
-	else
-		delay = 10000;
+	if (WARN_ON(max < sizeof(u32)))
+		return -EINVAL;
 
-	return delay;
-}
+	u32s_read = ath9k_rng_data_read(sc, (u32 *)data, max / sizeof(u32));
 
-static int ath9k_rng_kthread(void *data)
-{
-	int bytes_read;
-	struct ath_softc *sc = data;
-	u32 *rng_buf;
-	u32 delay, fail_stats = 0;
-
-	rng_buf = kmalloc_array(ATH9K_RNG_BUF_SIZE, sizeof(u32), GFP_KERNEL);
-	if (!rng_buf)
-		goto out;
-
-	while (!kthread_should_stop()) {
-		bytes_read = ath9k_rng_data_read(sc, rng_buf,
-						 ATH9K_RNG_BUF_SIZE);
-		if (unlikely(!bytes_read)) {
-			delay = ath9k_rng_delay_get(++fail_stats);
-			wait_event_interruptible_timeout(rng_queue,
-							 kthread_should_stop(),
-							 msecs_to_jiffies(delay));
-			continue;
-		}
-
-		fail_stats = 0;
-
-		/* sleep until entropy bits under write_wakeup_threshold */
-		add_hwgenerator_randomness((void *)rng_buf, bytes_read,
-					   ATH9K_RNG_ENTROPY(bytes_read));
+	while (wait && !u32s_read && retries--) {
+		udelay(10);
+		u32s_read = ath9k_rng_data_read(sc, (u32 *)data,
+						max / sizeof(u32));
 	}
 
-	kfree(rng_buf);
-out:
-	sc->rng_task = NULL;
-
-	return 0;
+	return u32s_read * sizeof(u32);
 }
 
 void ath9k_rng_start(struct ath_softc *sc)
 {
 	struct ath_hw *ah = sc->sc_ah;
 
-	if (sc->rng_task)
-		return;
-
 	if (!AR_SREV_9300_20_OR_LATER(ah))
 		return;
 
-	sc->rng_task = kthread_run(ath9k_rng_kthread, sc, "ath9k-hwrng");
-	if (IS_ERR(sc->rng_task))
-		sc->rng_task = NULL;
+	sc->rng.name = sc->dev->kobj.name; // TODO: Is this a good choice?
+	sc->rng.read = ath9k_rng_read;
+	sc->rng.quality = 320;
+
+	devm_hwrng_register(sc->dev, &sc->rng);
 }
 
 void ath9k_rng_stop(struct ath_softc *sc)
 {
-	if (sc->rng_task) {
-		kthread_stop(sc->rng_task);
-		sc->rng_task = NULL;
-	}
+	devm_hwrng_unregister(sc->dev, &sc->rng);
 }
