@@ -149,18 +149,20 @@ found:
 	if (pmbase == 0)
 		return -EIO;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	if (!request_region(pmbase + PMBASE_OFFSET, PMBASE_SIZE, DRV_NAME)) {
+	if (!devm_request_region(&pdev->dev, pmbase + PMBASE_OFFSET,
+				 PMBASE_SIZE, DRV_NAME)) {
 		dev_err(&pdev->dev, DRV_NAME " region 0x%x already in use!\n",
 			pmbase + 0xF0);
 		err = -EBUSY;
 		goto out;
 	}
 
-	priv->iobase = ioport_map(pmbase + PMBASE_OFFSET, PMBASE_SIZE);
+	priv->iobase = devm_ioport_map(&pdev->dev, pmbase + PMBASE_OFFSET,
+				       PMBASE_SIZE);
 	if (!priv->iobase) {
 		pr_err(DRV_NAME "Cannot map ioport\n");
 		err = -EINVAL;
@@ -180,27 +182,29 @@ found:
 	return 0;
 
 err_hwrng:
-	ioport_unmap(priv->iobase);
+	devm_ioport_unmap(&pdev->dev, priv->iobase);
 err_iomap:
-	release_region(pmbase + PMBASE_OFFSET, PMBASE_SIZE);
+	devm_release_region(&pdev->dev, pmbase + PMBASE_OFFSET, PMBASE_SIZE);
 out:
-	kfree(priv);
+	devm_kfree(&pdev->dev, priv);
 	return err;
 }
 
 static void __exit mod_exit(void)
 {
 	struct amd768_priv *priv;
+	struct device *dev;
 
 	priv = (struct amd768_priv *)amd_rng.priv;
+	dev = &priv->pdev->dev;
 
-	devm_hwrng_unregister(&priv->pcidev->dev, &amd_rng);
+	devm_hwrng_unregister(dev, &amd_rng);
 
-	ioport_unmap(priv->iobase);
+	devm_ioport_unmap(dev, priv->iobase);
 
-	release_region(priv->pmbase + PMBASE_OFFSET, PMBASE_SIZE);
+	devm_release_region(dev, priv->pmbase + PMBASE_OFFSET, PMBASE_SIZE);
 
-	kfree(priv);
+	devm_kfree(dev, priv);
 }
 
 module_init(mod_init);
