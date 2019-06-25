@@ -172,7 +172,7 @@ found:
 	priv->pcidev = pdev;
 
 	pr_info(DRV_NAME " detected\n");
-	err = hwrng_register(&amd_rng);
+	err = devm_hwrng_register(&pdev->dev, &amd_rng);
 	if (err) {
 		pr_err(DRV_NAME " registering failed (%d)\n", err);
 		goto err_hwrng;
@@ -194,7 +194,7 @@ static void __exit mod_exit(void)
 
 	priv = (struct amd768_priv *)amd_rng.priv;
 
-	hwrng_unregister(&amd_rng);
+	devm_hwrng_unregister(&priv->pcidev->dev, &amd_rng);
 
 	ioport_unmap(priv->iobase);
 
