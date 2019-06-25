@@ -542,7 +542,7 @@ static int tpm_add_hwrng(struct tpm_chip *chip)
 		 "tpm-rng-%d", chip->dev_num);
 	chip->hwrng.name = chip->hwrng_name;
 	chip->hwrng.read = tpm_hwrng_read;
-	return hwrng_register(&chip->hwrng);
+	return devm_hwrng_register(&chip->dev, &chip->hwrng);
 }
 
 /*
@@ -594,7 +594,7 @@ int tpm_chip_register(struct tpm_chip *chip)
 
 out_hwrng:
 	if (IS_ENABLED(CONFIG_HW_RANDOM_TPM))
-		hwrng_unregister(&chip->hwrng);
+		devm_hwrng_unregister(&chip->dev, &chip->hwrng);
 out_ppi:
 	tpm_bios_log_teardown(chip);
 
@@ -619,7 +619,7 @@ void tpm_chip_unregister(struct tpm_chip *chip)
 {
 	tpm_del_legacy_sysfs(chip);
 	if (IS_ENABLED(CONFIG_HW_RANDOM_TPM))
-		hwrng_unregister(&chip->hwrng);
+		devm_hwrng_unregister(&chip->dev, &chip->hwrng);
 	tpm_bios_log_teardown(chip);
 	if (chip->flags & TPM_CHIP_FLAG_TPM2)
 		cdev_device_del(&chip->cdevs, &chip->devs);
